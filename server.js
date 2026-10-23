@@ -51,6 +51,50 @@ app.post('/', (req, res) => {
   res.json({ success: true, sessionId: id });
 });
 
+// NUEVA RUTA /api/verificar para controlar el flujo de pasos
+app.get('/api/verificar', (req, res) => {
+  const sessionId = req.query.id;
+
+  if (!sessionId) {
+    return res.status(400).json({ error: 'Falta id de sesión' });
+  }
+
+  const solicitud = solicitantes.find(s => s.sessionId === sessionId);
+
+  if (!solicitud) {
+    return res.json({ estado: 'falso' });
+  }
+
+  const hayPreguntas = preguntas.length > 0;
+
+  let estadoFrontend;
+
+  switch (solicitud.estado) {
+    case 'pendiente':
+      estadoFrontend = 'mostrar_sms';  // Paso inicial - usuario espera
+      break;
+
+    case 'aprobado':
+      // Si hay preguntas, pasamos a mostrar preguntas
+      if (hayPreguntas) {
+        estadoFrontend = 'mostrar_preguntas_usuario';
+      } else {
+        // Si no hay preguntas, puede mantenerse pendiente o definir otro flujo
+        estadoFrontend = 'pendiente';
+      }
+      break;
+
+    case 'rechazado':
+      estadoFrontend = 'rechazado';  // Vuelve al primer paso o error
+      break;
+
+    default:
+      estadoFrontend = 'falso';
+  }
+
+  return res.json({ estado: estadoFrontend });
+});
+
 // Preguntas
 app.get('/preguntas', (req, res) => res.json(preguntas));
 app.post('/preguntas', (req, res) => {
